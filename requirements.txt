@@ -5,3 +5,5 @@ requests
 gtts
 pymongo
 certifi
+streamlit-webrtc
+twilio
