@@ -1094,11 +1094,11 @@ elif st.session_state.active_feature == "peersync":
                         st.error("Error evaluating. Retrying...")
             else:
                 st.warning("Host is generating the scorecard. Updating automatically...")
-                time.sleep(2)
+                time.sleep(3)
                 check_d = duels_collection.find_one({"room_id": duel["room_id"]})
                 if check_d.get("status") == "completed":
                     update_aura(50)
-                    st.rerun()
+                st.rerun()
 
         # 5. MATCH COMPLETED (SCORECARD + EXPLANATION)
         elif duel["status"] == "completed":
