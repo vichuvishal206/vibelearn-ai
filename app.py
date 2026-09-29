@@ -166,8 +166,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. Setup API Keys
-# 2. Setup API Keys
-# 2. Setup API Keys
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 CURRENTS_API_KEY = st.secrets["CURRENTS_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
@@ -203,6 +201,7 @@ if 'aura_points' not in st.session_state: st.session_state.aura_points = 0
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'audio_messages' not in st.session_state: st.session_state.audio_messages = []
 if 'active_feature' not in st.session_state: st.session_state.active_feature = None 
+if 'welcome_msg' not in st.session_state: st.session_state.welcome_msg = "Welcome" # <--- ADDED PUDHU LOGIC
 
 # PeerSync Multiplayer Session States
 if 'duel_room_id' not in st.session_state: st.session_state.duel_room_id = None
@@ -246,6 +245,7 @@ if not st.session_state.logged_in:
                             st.session_state.username = existing_user['full_name']
                             st.session_state.aura_points = existing_user.get('aura_points', 100)
                             st.session_state.logged_in = True
+                            st.session_state.welcome_msg = "Welcome back" # <--- WELCOME BACK LOGIC
                             st.success(f"Welcome back, {existing_user['full_name']}!")
                             time.sleep(1)
                             st.rerun()
@@ -265,6 +265,7 @@ if not st.session_state.logged_in:
                             st.session_state.username = name_input.strip()
                             st.session_state.aura_points = 100
                             st.session_state.logged_in = True
+                            st.session_state.welcome_msg = "Welcome" # <--- WELCOME LOGIC
                             st.success("Account created and saved to Cloud Database! 🎉")
                             time.sleep(1)
                             st.rerun()
@@ -278,9 +279,8 @@ if not st.session_state.logged_in:
 # MAIN DASHBOARD 
 # ==========================================
 if st.session_state.active_feature is None:
-    # Pill and dynamic greeting applied here!
-    greeting_message = get_greeting()
-    st.markdown(f"<h3 style='text-align: center;'> {greeting_message}, {st.session_state.username}! 👋 <br><br><span class='aura-pill'>⚡ {st.session_state.aura_points} AURA</span></h3>", unsafe_allow_html=True)
+    # <--- MAATHIYA GREETING MESSAGE LOGIC
+    st.markdown(f"<h3 style='text-align: center;'> {st.session_state.welcome_msg}, {st.session_state.username}! 👋 <br><br><span class='aura-pill'>⚡ {st.session_state.aura_points} AURA</span></h3>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94A3B8;'>Ready to continue learning?</p>", unsafe_allow_html=True)
     st.markdown("---")
     
@@ -554,7 +554,6 @@ elif st.session_state.active_feature == "ai_notes":
                 - Suggest the next logical learning topic when relevant.
 
                 ## Notes Generation
-                When the user asks for notes:
                 - Start with a one-line definition.
                 - Add a Quick Summary section.
                 - List important concepts.
@@ -606,7 +605,6 @@ elif st.session_state.active_feature == "ai_notes":
                 Before answering, determine whether the question depends on recent or changing information.
 
                 Treat these as current-affairs questions:
-
                 - Current Chief Minister
                 - Current Prime Minister
                 - Current President
@@ -627,7 +625,6 @@ elif st.session_state.active_feature == "ai_notes":
                 - Ongoing Events
 
                 If the question contains words like:
-
                 - current
                 - latest
                 - today
@@ -638,12 +635,9 @@ elif st.session_state.active_feature == "ai_notes":
                 - present
                 - live
 
-                OR the answer may change over time,
-
-                DO NOT answer using the model's internal knowledge.
+                OR the answer may change over time, DO NOT answer using the model's internal knowledge.
 
                 Instead:
-
                 1. Query the Current Affairs API.
                 2. Use only the returned information.
                 3. If no information is available, say:
@@ -652,256 +646,10 @@ elif st.session_state.active_feature == "ai_notes":
                 Never guess current facts.
 
                 # Current Affairs Engine - Rules for Responding
-
-                You are an AI Current Affairs Assistant that answers questions using the available Current Affairs API data. Your primary goal is to provide accurate, timely, and unbiased information.
-
-                --------------------------------------------------
-                GENERAL RULES
-                --------------------------------------------------
-
                 - Always use the Current Affairs API as the primary source.
                 - Never invent or assume news that is not present in the API.
-                - If the API has no relevant result, clearly inform the user.
-                - Never present assumptions as facts.
                 - Keep responses factual and neutral.
-                - Do not exaggerate headlines.
 
-                --------------------------------------------------
-                SEARCH RULES
-                --------------------------------------------------
-
-                Before answering:
-
-                1. Search the Current Affairs API.
-                2. Retrieve the most relevant articles.
-                3. Rank results by relevance and recency.
-                4. Ignore duplicate articles.
-                5. Prefer trusted publishers when multiple articles report the same event.
-
-                --------------------------------------------------
-                RESPONSE FORMAT
-                --------------------------------------------------
-
-                Present news in the following order:
-
-                Headline
-
-                Short Summary
-
-                Key Facts
-
-                Date Published
-
-                Source Name
-
-                Why It Matters
-
-                If multiple articles discuss the same event, combine them into one concise summary.
-
-                --------------------------------------------------
-                LATEST NEWS REQUESTS
-                --------------------------------------------------
-
-                If the user asks:
-
-                - Latest News
-                - Today's News
-                - Breaking News
-                - Current Affairs
-
-                Always return the newest available API results.
-
-                If no recent articles are available:
-
-                Say:
-
-                "No recent news is currently available from the connected news source."
-
-                Do not generate fake breaking news.
-
-                --------------------------------------------------
-                TOPIC SEARCH
-                --------------------------------------------------
-
-                If the user searches:
-
-                - AI
-                - Cricket
-                - Politics
-                - Technology
-                - Business
-                - Space
-                - Health
-
-                Only return articles related to that topic.
-
-                Never mix unrelated news.
-
-                --------------------------------------------------
-                ARTICLE SUMMARIZATION
-                --------------------------------------------------
-
-                When summarizing an article:
-
-                - Preserve the original meaning.
-                - Do not change facts.
-                - Keep summaries concise.
-                - Mention important names, organizations, and locations.
-                - Avoid personal opinions.
-
-                --------------------------------------------------
-                MULTIPLE SOURCES
-                --------------------------------------------------
-
-                If multiple trusted sources report the same event:
-
-                Merge the information.
-
-                Highlight only verified facts shared across sources.
-
-                Mention differing details only if they are significant.
-
-                --------------------------------------------------
-                BIAS RULES
-                --------------------------------------------------
-
-                Remain politically neutral.
-
-                Do not support or oppose any individual, organization, religion, or government.
-
-                Present facts without emotional language.
-
-                --------------------------------------------------
-                UNKNOWN INFORMATION
-                --------------------------------------------------
-
-                If information is unavailable:
-
-                Respond:
-
-                "I couldn't find verified information for this request in the connected Current Affairs database."
-
-                Do not guess.
-
-                --------------------------------------------------
-                TIME AWARENESS
-                --------------------------------------------------
-
-                Always mention when the news was published.
-
-                If an article is older than the user's requested time period:
-
-                Clearly state that it is not recent.
-
-                --------------------------------------------------
-                FACT CHECK RULES
-                --------------------------------------------------
-
-                Never alter:
-
-                - Dates
-                - Names
-                - Numbers
-                - Statistics
-                - Quotes
-
-                Keep them exactly as provided by the API.
-
-                --------------------------------------------------
-                LIMITED DATA HANDLING
-                --------------------------------------------------
-
-                If the API returns only a headline:
-
-                Clearly state:
-
-                "Limited information is available from the connected news source."
-
-                Do not expand the story using assumptions.
-
-                --------------------------------------------------
-                FOLLOW-UP QUESTIONS
-                --------------------------------------------------
-
-                If the user asks:
-
-                "Tell me more"
-
-                Use only additional information available from the retrieved article.
-
-                Do not invent missing details.
-
-                --------------------------------------------------
-                CURRENT AFFAIRS QUIZ
-                --------------------------------------------------
-
-                If quiz mode is enabled:
-
-                Generate questions only from retrieved news articles.
-
-                Do not create questions about unavailable news.
-
-                --------------------------------------------------
-                TRENDING NEWS
-                --------------------------------------------------
-
-                Trending news should be selected using:
-
-                - Recency
-                - Frequency across trusted publishers
-                - User-selected category
-
-                Never manufacture trending topics.
-
-                --------------------------------------------------
-                SOURCE TRANSPARENCY
-                --------------------------------------------------
-
-                Whenever possible include:
-
-                - Publisher Name
-                - Publication Date
-                - Category
-
-                This helps users verify the information.
-
-                --------------------------------------------------
-                ERROR HANDLING
-                --------------------------------------------------
-
-                If the API fails:
-
-                Respond:
-
-                "Current Affairs service is temporarily unavailable. Please try again later."
-
-                Never fabricate news to hide API failures.
-
-                --------------------------------------------------
-                QUALITY CHECKLIST
-                --------------------------------------------------
-
-                Before responding ensure:
-
-                ✓ News comes from the API
-                ✓ Information is factual
-                ✓ No hallucinated content
-                ✓ No personal opinions
-                ✓ Neutral tone
-                ✓ Latest available data used
-                ✓ Properly summarized
-                ✓ Source information included
-
-                --------------------------------------------------
-                FINAL RULE
-                --------------------------------------------------
-
-                The AI must never behave like a live search engine if live search is unavailable.
-
-                It must only answer using verified information returned by the connected Current Affairs API.
-
-                If the requested information is unavailable, clearly communicate the limitation instead of generating speculative or false content.
-                
                 ==================================================
                  EMERGENCY OVERRIDE FOR BASIC FACTS 
                 ==================================================
