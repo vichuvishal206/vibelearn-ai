@@ -1,9 +1,5 @@
-streamlit==1.32.0
+streamlit
 google-generativeai
 PyPDF2
 requests
 gtts
-pymongo
-certifi
-streamlit-webrtc
-twilio
