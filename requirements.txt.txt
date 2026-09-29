@@ -1,0 +1,9 @@
+streamlit==1.32.0
+google-generativeai
+PyPDF2
+requests
+gtts
+pymongo
+certifi
+streamlit-webrtc
+twilio
