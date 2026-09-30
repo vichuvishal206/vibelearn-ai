@@ -13,6 +13,12 @@ import certifi
 import streamlit.components.v1 as components
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from twilio.rest import Client
+from werkzeug.security import generate_password_hash, check_password_hash
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import re
 
 # ==========================================
 # DATABASE & CLOUD CONFIGURATION
@@ -31,7 +37,6 @@ try:
     modules_collection = db["StudyModules"]
     duels_collection = db["PeerSyncDuels"]
     rooms_collection = db["VibeRooms"]
-    # MongoDB success popup removed as requested
 except Exception as e:
     st.error(f"Database connection failed: {e}")
 
@@ -57,28 +62,68 @@ def get_greeting():
     else:
         return "Good Night"
 
-# --- Twilio TURN Server Connection Function ---
+# --- Secure Email OTP Setup (SMTP) ---
+EMAIL_SENDER = st.secrets.get("EMAIL_SENDER", "")
+EMAIL_PASSWORD = st.secrets.get("EMAIL_PASSWORD", "")
+
+def send_real_email_otp(receiver_email, otp_code, purpose="Account Verification"):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        return False, "Email secrets (EMAIL_SENDER, EMAIL_PASSWORD) not configured in Streamlit Secrets."
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"Vibe Learn AI <{EMAIL_SENDER}>"
+        msg['To'] = receiver_email
+        msg['Subject'] = f"Vibe Learn: Your OTP for {purpose}"
+        
+        body = f"""
+        Hello Scholar!
+        
+        Your 4-digit OTP for {purpose} is: {otp_code}
+        
+        Please do not share this code with anyone. It is valid for this session only.
+        
+        Happy Learning!
+        - Vibe Learn AI Team
+        """
+        msg.attach(MIMEText(body, 'plain'))
+        
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+        return True, "Email sent successfully."
+    except Exception as e:
+        return False, f"SMTP Error: {str(e)}"
+
+# Helper: Password Strength Checker
+def check_password_strength(password):
+    if len(password) < 8: return False, "Password must be at least 8 characters long."
+    if not re.search(r"[A-Z]", password): return False, "Must contain at least one uppercase letter."
+    if not re.search(r"[0-9]", password): return False, "Must contain at least one number."
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password): return False, "Must contain at least one special character."
+    return True, "Strong Password."
+
+# --- Twilio Client Initialization (For Vibe Room WebRTC Only) ---
+TWILIO_SID = st.secrets.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+
 @st.cache_data
 def get_ice_servers():
     try:
-        # Tries to fetch from secrets
-        account_sid = st.secrets.get("TWILIO_ACCOUNT_SID", "")
-        auth_token = st.secrets.get("TWILIO_AUTH_TOKEN", "")
-        if account_sid and auth_token:
-            twilio_client = Client(account_sid, auth_token)
+        if TWILIO_SID and TWILIO_TOKEN:
+            twilio_client = Client(TWILIO_SID, TWILIO_TOKEN)
             token = twilio_client.tokens.create()
             return token.ice_servers
         else:
             return [{"urls": ["stun:stun.l.google.com:19302"]}]
     except Exception:
-        # Fallback to free Google STUN server
         return [{"urls": ["stun:stun.l.google.com:19302"]}]
 
 # 1. Page Config
 st.set_page_config(page_title="Vibe Learn | Dashboard", page_icon="✨", layout="wide")
 
 # ==========================================
-# UI DESIGN CSS INJECTION (PREMIUM SAAS & GLASSMORPHISM)
+# UI DESIGN CSS INJECTION (PREMIUM SAAS NAVY BLUE)
 # ==========================================
 st.markdown("""
     <style>
@@ -88,7 +133,7 @@ st.markdown("""
         /* 2. Hide Streamlit Defaults for Clean UI */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        header {visibility: hidden;}
+        /* header {visibility: hidden;} <-- Removed to fix Mobile Sidebar issue */
         
         /* 3. Global Font Settings */
         html, body, [class*="css"] {
@@ -162,54 +207,41 @@ st.markdown("""
             display: inline-block;
             box-shadow: 0 0 10px rgba(245,158,11,0.2);
         }
+
+        /* 8. Splash Screen Logo Glow */
+        .splash-logo {
+            font-size: 6rem;
+            text-align: center;
+            background: -webkit-linear-gradient(135deg, #4D9CFF, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+            margin-bottom: 0px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Setup API Keys
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-CURRENTS_API_KEY = st.secrets["CURRENTS_API_KEY"]
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(model_name='gemini-flash-latest')
-
-# CURRENTS NEWS API FUNCTION
-def get_currents_news(query):
-    if CURRENTS_API_KEY == "YOUR_CURRENTS_API_KEY" or not CURRENTS_API_KEY.strip():
-        return "⚠️ News API Key not configured. Please add your Currents API key in the code."
-    
-    clean_query = query.lower()
-    clean_query = clean_query.replace("cm", "Chief Minister").replace("tn", "Tamil Nadu").replace("pm", "Prime Minister")
-    
-    url = f"https://api.currentsapi.services/v1/search?keywords={clean_query}&language=en&apiKey={CURRENTS_API_KEY}"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        
-        if "news" in data and len(data["news"]) > 0:
-            news_summary = "Live News Data from Currents API:\n"
-            for article in data["news"][:3]:  # Top 3 articles
-                news_summary += f"- Title: {article['title']}\n  Summary: {article['description']}\n  Author/Source: {article.get('author', 'News Desk')}\n  Date: {article.get('published', 'Recent')}\n"
-            return news_summary
-        else:
-            return "No recent news found for this specific topic."
-    except Exception as e:
-        return f"News API error: {e}"
-
 # 3. Session States
+if 'show_splash' not in st.session_state: st.session_state.show_splash = True # NEW: Splash screen state
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'username' not in st.session_state: st.session_state.username = ""
 if 'aura_points' not in st.session_state: st.session_state.aura_points = 0
 if 'messages' not in st.session_state: st.session_state.messages = []
 if 'audio_messages' not in st.session_state: st.session_state.audio_messages = []
 if 'active_feature' not in st.session_state: st.session_state.active_feature = None 
-if 'welcome_msg' not in st.session_state: st.session_state.welcome_msg = "Welcome" # <--- ADDED PUDHU LOGIC
+if 'welcome_msg' not in st.session_state: st.session_state.welcome_msg = "Welcome"
 
-# PeerSync Multiplayer Session States
+# Simple OTP Auth States
+if 'awaiting_otp_signup' not in st.session_state: st.session_state.awaiting_otp_signup = False
+if 'awaiting_otp_forgot' not in st.session_state: st.session_state.awaiting_otp_forgot = False
+if 'reset_verified' not in st.session_state: st.session_state.reset_verified = False
+if 'temp_signup_data' not in st.session_state: st.session_state.temp_signup_data = {}
+if 'generated_otp' not in st.session_state: st.session_state.generated_otp = ""
+if 'temp_email' not in st.session_state: st.session_state.temp_email = ""
+
+# PeerSync & Other Session States
 if 'duel_room_id' not in st.session_state: st.session_state.duel_room_id = None
-
-# Chronos Adaptive Scheduler Session States
 if 'chronos_schedule' not in st.session_state: st.session_state.chronos_schedule = ""
-
-# Vibe Room Session States
 if 'current_vibe_room' not in st.session_state: st.session_state.current_vibe_room = None
 
 # GLOBAL CURRENT AFFAIRS DETECTION KEYWORDS
@@ -221,65 +253,192 @@ NEWS_KEYWORDS = [
 ]
 
 # ==========================================
-# LOGIN GATEWAY (MODULE 1: USER PROFILES DB)
+# SPLASH SCREEN / LANDING PAGE
 # ==========================================
+if st.session_state.show_splash and not st.session_state.logged_in:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    img_col1, img_col2, img_col3 = st.columns([1, 2, 1])
+    with img_col2:
+        try:
+            st.image("logo.png", use_container_width=True)
+        except Exception:
+            st.markdown("<h1 class='splash-logo' style='text-align:center;'>Vibe Learn</h1>", unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    btn_col1, btn_col2, btn_col3 = st.columns([2.5, 1, 2.5])
+    with btn_col2:
+        if st.button("➔", type="primary", use_container_width=True):
+            st.session_state.show_splash = False
+            st.rerun()
+            
+    st.stop() # Stops execution here so it doesn't load the login page behind the scenes
+
+# ==========================================
+# SIMPLIFIED LOGIN GATEWAY
+# ==========================================
+
 if not st.session_state.logged_in:
     st.markdown("<h1 style='text-align: center; color: #4D9CFF;'> Vibe Learn !</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #94A3B8;'>AI that matches your vibe. Learning that sticks.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #94A3B8;'>Your Brain, Upgraded with AI.</p>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     
     with st.container():
-        st.markdown("### 🔐 Secure User Login")
-        with st.form("login_form"):
-            name_input = st.text_input("Full Name:")
-            email_input = st.text_input("Email ID:")
-            password_input = st.text_input("Password:", type="password")
+        # --- 1. OTP FOR SIGNUP ---
+        if st.session_state.awaiting_otp_signup:
+            st.markdown("### 🔐 Verify Email (Registration)")
+            st.info(f"OTP sent to {st.session_state.temp_signup_data.get('email', '')}")
+            with st.form("signup_otp_form"):
+                otp_input = st.text_input("Enter 4-digit OTP:", max_chars=4)
+                c1, c2 = st.columns(2)
+                if c1.form_submit_button("Verify & Activate", type="primary", use_container_width=True):
+                    if otp_input.strip() == st.session_state.generated_otp:
+                        users_collection.insert_one(st.session_state.temp_signup_data)
+                        st.session_state.username = st.session_state.temp_signup_data['full_name']
+                        st.session_state.aura_points = 100
+                        st.session_state.logged_in = True
+                        st.session_state.welcome_msg = "Welcome"
+                        st.session_state.awaiting_otp_signup = False
+                        st.success("Account successfully created and verified! 🎉")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Incorrect OTP.")
+                if c2.form_submit_button("Cancel", use_container_width=True):
+                    st.session_state.awaiting_otp_signup = False
+                    st.rerun()
+
+        # --- 2. OTP FOR FORGOT PASSWORD ---
+        elif st.session_state.awaiting_otp_forgot:
+            st.markdown("### 🔐 Verify Email (Password Reset)")
+            st.info(f"OTP sent to {st.session_state.temp_email}")
+            with st.form("forgot_otp_form"):
+                otp_input = st.text_input("Enter 4-digit OTP:", max_chars=4)
+                c1, c2 = st.columns(2)
+                if c1.form_submit_button("Verify OTP", type="primary", use_container_width=True):
+                    if otp_input.strip() == st.session_state.generated_otp:
+                        st.session_state.awaiting_otp_forgot = False
+                        st.session_state.reset_verified = True
+                        st.rerun()
+                    else:
+                        st.error("❌ Incorrect OTP.")
+                if c2.form_submit_button("Cancel", use_container_width=True):
+                    st.session_state.awaiting_otp_forgot = False
+                    st.rerun()
+
+        # --- 3. NEW PASSWORD SET (POST-OTP) ---
+        elif st.session_state.reset_verified:
+            st.markdown("### 🔑 Set New Password")
+            with st.form("new_password_form"):
+                new_pwd = st.text_input("New Password:", type="password", help="Min 8 chars, 1 Uppercase, 1 Number, 1 Special Char")
+                c_new_pwd = st.text_input("Confirm New Password:", type="password")
+                if st.form_submit_button("Update Password", type="primary", use_container_width=True):
+                    is_strong, msg = check_password_strength(new_pwd)
+                    if not is_strong:
+                        st.error(f"Weak Password: {msg}")
+                    elif new_pwd != c_new_pwd:
+                        st.error("Passwords do not match!")
+                    else:
+                        users_collection.update_one(
+                            {"email": st.session_state.temp_email},
+                            {"$set": {"password": generate_password_hash(new_pwd)}}
+                        )
+                        st.success("Password updated successfully! Please login.")
+                        st.session_state.reset_verified = False
+                        st.session_state.temp_email = ""
+                        time.sleep(2)
+                        st.rerun()
+
+        # --- 4. MAIN SINGLE-PAGE TABS (LOGIN / REGISTER) ---
+        else:
+            tab_login, tab_signup = st.tabs(["🔐 Login", "📝 Register"])
             
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.form_submit_button("Get Started", use_container_width=True):
-                if name_input.strip() and email_input.strip() and password_input.strip():
-                    try:
-                        existing_user = users_collection.find_one({"email": email_input.strip()})
-                        
-                        if existing_user:
-                            st.session_state.username = existing_user['full_name']
-                            st.session_state.aura_points = existing_user.get('aura_points', 100)
+            with tab_login:
+                with st.form("login_form"):
+                    l_email = st.text_input("Email ID:")
+                    l_pwd = st.text_input("Password:", type="password")
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    col_btn1, col_btn2 = st.columns(2)
+                    login_btn = col_btn1.form_submit_button("Login", use_container_width=True, type="primary")
+                    forgot_btn = col_btn2.form_submit_button("Forgot Password?", use_container_width=True)
+                    
+                    if login_btn:
+                        user = users_collection.find_one({"email": l_email.strip()})
+                        if user and check_password_hash(user.get("password", ""), l_pwd.strip()):
+                            # Direct Login (No 2FA)
+                            st.session_state.username = user['full_name']
+                            st.session_state.aura_points = user.get('aura_points', 100)
                             st.session_state.logged_in = True
-                            st.session_state.welcome_msg = "Welcome back" # <--- WELCOME BACK LOGIC
-                            st.success(f"Welcome back, {existing_user['full_name']}!")
+                            st.session_state.welcome_msg = "Welcome back"
+                            st.success(f"Welcome back, {user['full_name']}!")
                             time.sleep(1)
                             st.rerun()
                         else:
-                            new_user = {
-                                "full_name": name_input.strip(),
-                                "email": email_input.strip(),
-                                "password": password_input.strip(),
-                                "role": "Student",
-                                "aura_points": 100,
-                                "duel_invites": [],
-                                "quiz_history": [],
-                                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            }
-                            users_collection.insert_one(new_user)
+                            st.error("Invalid Email or Password.")
                             
-                            st.session_state.username = name_input.strip()
-                            st.session_state.aura_points = 100
-                            st.session_state.logged_in = True
-                            st.session_state.welcome_msg = "Welcome" # <--- WELCOME LOGIC
-                            st.success("Account created and saved to Cloud Database! 🎉")
-                            time.sleep(1)
-                            st.rerun()
-                    except Exception as db_err:
-                        st.error(f"Database error during login: {db_err}")
-                else:
-                    st.warning("Please fill in all fields.")
+                    if forgot_btn:
+                        if l_email.strip():
+                            if users_collection.find_one({"email": l_email.strip()}):
+                                otp = str(random.randint(1000, 9999))
+                                st.session_state.generated_otp = otp
+                                st.session_state.temp_email = l_email.strip()
+                                
+                                success, msg = send_real_email_otp(l_email.strip(), otp, "Password Reset")
+                                if success:
+                                    st.session_state.awaiting_otp_forgot = True
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            else:
+                                st.error("Email not found in database.")
+                        else:
+                            st.warning("Please type your Email ID in the box above to reset your password.")
+            
+            with tab_signup:
+                with st.form("signup_form"):
+                    r_name = st.text_input("Full Name:")
+                    r_email = st.text_input("Email ID:")
+                    r_pwd = st.text_input("Password:", type="password", help="Min 8 chars, 1 Uppercase, 1 Number, 1 Special Char")
+                    r_cpwd = st.text_input("Confirm Password:", type="password")
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.form_submit_button("Register & Verify Email", use_container_width=True, type="primary"):
+                        if not (r_name and r_email and r_pwd and r_cpwd):
+                            st.warning("All fields are required.")
+                        elif users_collection.find_one({"email": r_email.strip()}):
+                            st.error("Email already registered.")
+                        elif r_pwd != r_cpwd:
+                            st.error("Passwords do not match.")
+                        else:
+                            is_strong, msg = check_password_strength(r_pwd)
+                            if not is_strong:
+                                st.error(f"Weak Password: {msg}")
+                            else:
+                                otp = str(random.randint(1000, 9999))
+                                st.session_state.generated_otp = otp
+                                
+                                success, email_msg = send_real_email_otp(r_email.strip(), otp, "Registration Verification")
+                                if success:
+                                    st.session_state.temp_signup_data = {
+                                        "full_name": r_name.strip(),
+                                        "email": r_email.strip(),
+                                        "password": generate_password_hash(r_pwd.strip()),
+                                        "role": "Student", "aura_points": 100, "duel_invites": [], "quiz_history": [],
+                                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    }
+                                    st.session_state.awaiting_otp_signup = True
+                                    st.rerun()
+                                else:
+                                    st.error(email_msg)
+
     st.stop()
 
 # ==========================================
 # MAIN DASHBOARD 
 # ==========================================
 if st.session_state.active_feature is None:
-    # <--- MAATHIYA GREETING MESSAGE LOGIC
     st.markdown(f"<h3 style='text-align: center;'> {st.session_state.welcome_msg}, {st.session_state.username}! 👋 <br><br><span class='aura-pill'>⚡ {st.session_state.aura_points} AURA</span></h3>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94A3B8;'>Ready to continue learning?</p>", unsafe_allow_html=True)
     st.markdown("---")
@@ -347,13 +506,13 @@ if st.session_state.active_feature is None:
                     else:
                         st.markdown(f"**{medal} {name}** - `{points} AP`")
                     rank += 1
-                    st.divider()
+                    # st.divider() <-- Removed gap
             except Exception as e:
                 st.write("Leaderboard updating...")
                 
     st.markdown("<br><hr>", unsafe_allow_html=True)
     
-    _, logout_center, _ = st.columns([2, 1, 2])
+    col1, logout_center, col3 = st.columns([1, 1, 1])
     with logout_center:
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.logged_in = False
@@ -362,6 +521,7 @@ if st.session_state.active_feature is None:
             st.session_state.current_vibe_room = None
             st.session_state.messages = []
             st.session_state.audio_messages = []
+            st.session_state.show_splash = True
             st.rerun()
 
 # ==========================================
@@ -397,7 +557,7 @@ elif st.session_state.active_feature == "ai_notes":
             if search_query.strip():
                 query["topic"] = {"$regex": search_query, "$options": "i"}
                 
-            # Changed to sort by pinned first, then by created_at
+            # Sort by pinned first, then by created_at
             recent_chats = list(modules_collection.find(query).sort([("is_pinned", -1), ("created_at", -1)]).limit(8))
             
             for doc in recent_chats:
@@ -565,40 +725,40 @@ elif st.session_state.active_feature == "ai_notes":
                 Structure: Definition -> Quick Summary -> Important Points -> Examples -> Formula (if applicable) -> Common Mistakes -> Revision Points
 
                 ## Summarization
-                When summarizing: Preserve original meaning, remove unnecessary details, highlight important concepts, keep it concise.
+                - When summarizing: Preserve original meaning, remove unnecessary details, highlight important concepts, keep it concise.
 
                 ## Quiz Mode
-                When creating quizzes: Ask one question at a time, wait for user's answer, do not reveal answer early, explain why it's correct/incorrect, mention difficulty level.
+                - When creating quizzes: Ask one question at a time, wait for user's answer, do not reveal answer early, explain why it's correct/incorrect, mention difficulty level.
 
                 ## Flashcards
-                One concept per flashcard. Front = Question/Term, Back = Short explanation.
+                - One concept per flashcard. Front = Question/Term, Back = Short explanation.
 
                 ## Mind Maps & Roadmaps
-                Mind Maps: Clean text-based hierarchy using indentation. Roadmaps: Beginner to advanced, prerequisites, practice suggestions.
+                - Mind Maps: Clean text-based hierarchy using indentation. Roadmaps: Beginner to advanced, prerequisites, practice suggestions.
 
                 ## Coding Assistance
-                Explain approach -> clean readable code -> comments -> Time/Space complexity -> sample I/O -> common mistakes.
+                - Explain approach -> clean readable code -> comments -> Time/Space complexity -> sample I/O -> common mistakes.
 
                 ## Mathematics, Science & Engineering
-                Show step-by-step calculations. State formulas. Explain principles before formulas, mention applications.
+                - Show step-by-step calculations. State formulas. Explain principles before formulas, mention applications.
 
                 ## PDF Handling
-                Read entire document. Base answers primarily on uploaded doc. Summarize, extract key concepts. Do not fabricate.
+                - Read entire document. Base answers primarily on uploaded doc. Summarize, extract key concepts. Do not fabricate.
 
                 ## Personalization
-                Adjust to Beginner, Intermediate, or Advanced level. Use Visual Learning (text diagrams, trees, tables) when useful.
+                - Adjust to Beginner, Intermediate, or Advanced level. Use Visual Learning (text diagrams, trees, tables) when useful.
 
                 ## Memory & Safety
-                Only remember requested info. Never remember sensitive data. Never provide harmful/illegal instructions.
+                - Only remember requested info. Never remember sensitive data. Never provide harmful/illegal instructions.
 
                 ## Smart Behaviors
-                Auto-detect required format (Notes, Quiz, Mind Map, etc.) and generate it. 
+                - Auto-detect required format (Notes, Quiz, Mind Map, etc.) and generate it. 
 
                 ## Quality Checklist
-                Accurate, Clear, Structured, Easy to understand, Relevant, Practical, Concise, Helpful, properly formatted.
+                - Accurate, Clear, Structured, Easy to understand, Relevant, Practical, Concise, Helpful, properly formatted.
 
                 ## Final Rule
-                Always aim to maximize learning, clarity, and accuracy while minimizing confusion. Every response should help the user understand, remember, and apply the concept effectively.
+                - Always aim to maximize learning, clarity, and accuracy while minimizing confusion. Every response should help the user understand, remember, and apply the concept effectively.
 
                 ## Current Affairs Detection Rules
 
