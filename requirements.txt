@@ -7,3 +7,4 @@ pymongo
 certifi
 streamlit-webrtc
 twilio
+Werkzeug
