@@ -28,7 +28,7 @@ CURRENTS_API_KEY = st.secrets.get("CURRENTS_API_KEY", "")
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Initializing Gemini 1.5 Flash for multimodal (Audio + Text) features
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3.8-flash')
 
 def get_currents_news(query):
     if not CURRENTS_API_KEY:
