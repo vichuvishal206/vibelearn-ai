@@ -6,7 +6,7 @@ import json
 import requests
 from datetime import datetime, date
 import io
-from gtts import gTTS  
+from gtts import gTTS
 import random
 import pymongo
 import certifi
@@ -19,6 +19,34 @@ import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import re
+
+# ==========================================
+# GEMINI AI & NEWS API CONFIGURATION (FIX ADDED HERE)
+# ==========================================
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+CURRENTS_API_KEY = st.secrets.get("CURRENTS_API_KEY", "")
+
+genai.configure(api_key=GEMINI_API_KEY)
+# Initializing Gemini 1.5 Flash for multimodal (Audio + Text) features
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+def get_currents_news(query):
+    if not CURRENTS_API_KEY:
+        return "Currents API Key missing in secrets."
+    try:
+        url = f"https://api.currentsapi.services/v1/search?keywords={query}&language=en&apiKey={CURRENTS_API_KEY}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            news_data = response.json().get("news", [])
+            if not news_data:
+                return "No recent news found."
+            context = "LATEST NEWS CONTEXT:\n"
+            for article in news_data[:3]:
+                context += f"- {article.get('title')}: {article.get('description')}\n"
+            return context
+        return "Failed to fetch live news."
+    except Exception as e:
+        return f"Error fetching news: {e}"
 
 # ==========================================
 # DATABASE & CLOUD CONFIGURATION
@@ -222,7 +250,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. Session States
-if 'show_splash' not in st.session_state: st.session_state.show_splash = True # NEW: Splash screen state
+if 'show_splash' not in st.session_state: st.session_state.show_splash = True
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'username' not in st.session_state: st.session_state.username = ""
 if 'aura_points' not in st.session_state: st.session_state.aura_points = 0
@@ -273,7 +301,7 @@ if st.session_state.show_splash and not st.session_state.logged_in:
             st.session_state.show_splash = False
             st.rerun()
             
-    st.stop() # Stops execution here so it doesn't load the login page behind the scenes
+    st.stop()
 
 # ==========================================
 # SIMPLIFIED LOGIN GATEWAY
@@ -367,7 +395,6 @@ if not st.session_state.logged_in:
                     if login_btn:
                         user = users_collection.find_one({"email": l_email.strip()})
                         if user and check_password_hash(user.get("password", ""), l_pwd.strip()):
-                            # Direct Login (No 2FA)
                             st.session_state.username = user['full_name']
                             st.session_state.aura_points = user.get('aura_points', 100)
                             st.session_state.logged_in = True
@@ -506,7 +533,6 @@ if st.session_state.active_feature is None:
                     else:
                         st.markdown(f"**{medal} {name}** - `{points} AP`")
                     rank += 1
-                    # st.divider() <-- Removed gap
             except Exception as e:
                 st.write("Leaderboard updating...")
                 
@@ -1090,7 +1116,7 @@ elif st.session_state.active_feature == "peersync":
         col_rh1, col_rh2 = st.columns([4, 1])
         with col_rh1:
             st.markdown(f"### Room Code: `{duel['room_id']}` | Topic: **{duel['topic']}**")
-            st.caption(f"👑 Host: **{host_display}** VS ⚔️ Opponent: **{opp_display}**")
+            st.caption(f"👑 Host: **{host_display}** VS ⚔️️ Opponent: **{opp_display}**")
         with col_rh2:
             if st.button("🚪 Exit Match", use_container_width=True):
                 st.session_state.duel_room_id = None
